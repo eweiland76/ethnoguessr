@@ -81,12 +81,6 @@ apscheduler
 python-dotenv
 ```
 
-Install via:
-
-```bash
-pip install -r requirements.txt
-```
-
 ---
 
 ## 🛡 License
