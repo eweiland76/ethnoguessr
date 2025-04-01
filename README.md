@@ -15,7 +15,7 @@ A fun and competitive GeoGuessr-style bot for Discord, built to track daily scor
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Setup & Usage
 
 ### 1. Clone the Repo
 
@@ -24,26 +24,24 @@ git clone https://github.com/eweiland76/ethnoguessr.git
 cd ethnoguessr
 ```
 
-### 2. Set Up Environment
-
-Create a `.env` file in the root directory:
-
-```env
-DISCORD_TOKEN=your_discord_bot_token_here
-```
-
-> ⚠️ Never commit your `.env` file to GitHub!
-
-### 3. Install Requirements
+### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
+### 3. Create a `.env` File
+
+```env
+DISCORD_TOKEN=your_discord_bot_token_here
+```
+
+> ⚠️ Do **not** commit your `.env` file to GitHub.
+
 ### 4. Run the Bot
 
 ```bash
-python bot/main.py
+python ethnoguessr_bot.py
 ```
 
 ---
@@ -63,30 +61,25 @@ python bot/main.py
 
 ---
 
-## 📁 Folder Structure
+## 🗃 Persistence
 
-```
-ethnoguessr/
-├── bot/
-│   ├── main.py                # Main bot logic
-│   └── (optional utils files: storage.py, config.py, etc.)
-├── data/                      # Score & config files saved here
-│   ├── scores_<guild>.txt
-│   ├── king_wins_<guild>.txt
-│   └── guild_configs.txt
-├── .env                       # Discord token (not committed)
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
+All scores, wins, and settings are saved to `.txt` files:
+
+- `scores_<guild_id>.txt`
+- `king_wins_<guild_id>.txt`
+- `guild_configs.txt`
+
+These are automatically reloaded when the bot restarts.
 
 ---
 
 ## 📦 Dependencies
 
-- discord.py
-- apscheduler
-- python-dotenv
+```
+discord.py
+apscheduler
+python-dotenv
+```
 
 Install via:
 
@@ -98,12 +91,8 @@ pip install -r requirements.txt
 
 ## 🛡 License
 
-MIT License. Use, modify, and enhance freely!
+MIT License. Use, modify, and enhance freely.
 
 ---
 
-## 🛠 Built With Love
-
-Made for EthnoGuessr players who take competition (way too) seriously.
-
-👑 Long live the King.
+## 👑 Long live the King.
