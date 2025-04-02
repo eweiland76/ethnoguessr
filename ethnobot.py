@@ -282,44 +282,50 @@ async def on_message(message):
         return
 
     gid = message.guild.id
+
+    # Ensure data is always loaded
     if gid not in ethno_scores:
         load_scores(gid)
+    if gid not in bot.guild_configs:
+        load_guild_configs()
 
     config = bot.guild_configs.get(gid)
     if config and message.channel.id == config.get("score_channel_id"):
-        # 🔍 Print the raw message for debugging
-        print(f"[DEBUG] Raw message:\n{message.content}\n")
+        print(f"[DEBUG] Message from {message.author.display_name}:\n{message.content}\n")
 
-        # 🧠 More flexible regex
-        pattern = r"average of (\d+)[^\n]*?\n.*?best round.*?(\d+)"
-        match = re.search(pattern, message.content, re.IGNORECASE | re.DOTALL)
+        # Only match the average score
+        avg_match = re.search(r"average of (\d+)", message.content, re.IGNORECASE)
+        if not avg_match:
+            print("[DEBUG] No average score found.")
+            return
 
-        if match:
-            avg, best = int(match.group(1)), int(match.group(2))
+        avg = int(avg_match.group(1))
 
-            if avg == 5000:
-                await message.channel.send(f"🚨 Cheater detected: **{message.author.display_name}**.")
-                return
+        # 🚨 Cheat detection
+        if avg == 5000:
+            await message.channel.send(f"🚨 Cheater detected: **{message.author.display_name}**.")
+            return
 
-            if message.author.id in ethno_scores.get(gid, {}):
-                await message.channel.send(f"⚠️ **{message.author.display_name}** already posted today.")
-                return
+        # 🔁 Prevent multiple posts per day
+        if message.author.id in ethno_scores.get(gid, {}):
+            await message.channel.send(f"⚠️ **{message.author.display_name}** already posted today.")
+            return
 
-            ethno_scores.setdefault(gid, {})[message.author.id] = {
-                'average': avg,
-                'best': best,
-                'name': message.author.display_name
-            }
-            save_scores(gid)
+        # ✅ Save with just average (best = None or same as avg if you want to populate)
+        ethno_scores.setdefault(gid, {})[message.author.id] = {
+            'average': avg,
+            'best': avg,  # or set to 0 or None if you'd rather not use it at all
+            'name': message.author.display_name
+        }
+        save_scores(gid)
 
-            await message.channel.send(
-                f"📊 Recorded EthnoGuessr results for **{message.author.display_name}**!\n"
-                f"• 🧮 Average Score: {avg}\n"
-                f"• 🥇 Best Round: {best}"
-            )
-        else:
-            print("[DEBUG] No match found in message.")
+        await message.channel.send(
+            f"📊 Recorded EthnoGuessr results for **{message.author.display_name}**!\n"
+            f"• 🧮 Average Score: {avg}"
+        )
+
     await bot.process_commands(message)
+
 
 # --- Bot Runner ---
 bot.run(os.getenv('DISCORD_TOKEN'))
