@@ -17,15 +17,15 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 scheduler = AsyncIOScheduler()
 
-bot.guild_configs = {}  # guild_id: {announce_channel_id, score_channel_id}
-ETHNO_KING_ROLE_ID = "XXX"
-AUTHORIZED_ROLE_ID = "XXX" #
+bot.guild_configs = {}
+ETHNO_KING_ROLE_ID = xxx
+AUTHORIZED_ROLE_ID = xxx
 UNAUTHORIZED_IMAGE_URL = "https://i.imgur.com/02JdB5S.gif"
 
-ethno_scores = {}  # {guild_id: {user_id: score_data}}
-king_wins = {}     # {guild_id: {user_id: win_count}}
+ethno_scores = {}
+king_wins = {}
 
-# --- Storage Utilities ---
+# File utils
 def get_score_file(guild_id): return f"scores_{guild_id}.txt"
 def get_win_file(guild_id): return f"king_wins_{guild_id}.txt"
 def get_config_file(): return "guild_configs.txt"
@@ -83,7 +83,7 @@ def load_guild_configs():
                 }
 # --- Role/Authorization Helpers ---
 def has_authorized_role(ctx):
-    return any(role.id == AUTHORIZED_ROLE_ID for role in ctx.author.roles) or ctx.author.id == XXX
+    return any(role.id == AUTHORIZED_ROLE_ID for role in ctx.author.roles) or ctx.author.id == xxx
 
 async def unauthorized_response(ctx):
     await ctx.send("⛔ You are not authorized to use this command.")
@@ -176,12 +176,25 @@ async def testreset(ctx):
 @bot.command()
 async def ethnoboard(ctx):
     gid = ctx.guild.id
-    if not ethno_scores.get(gid): return await ctx.send("No scores recorded today. 🌍")
+    if not ethno_scores.get(gid):
+        return await ctx.send("No scores recorded today. 🌍")
+
     load_king_wins(gid)
     scores = sorted(ethno_scores[gid].items(), key=lambda x: x[1]['average'], reverse=True)
-    lines = [f"**{i+1}. {data['name']}** – Avg: {data['average']} | Best: {data['best']} | 👑 Wins: {king_wins[gid].get(uid, 0)}"
-             for i, (uid, data) in enumerate(scores)]
-    await ctx.send("### 🌎 EthnoGuessr Daily Leaderboard\n" + "\n".join(lines))
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["### 🌎 EthnoGuessr Daily Leaderboard"]
+
+    for i, (uid, data) in enumerate(scores):
+        medal = medals[i] if i < 3 else ""
+        name_line = f"{medal} **{data['name']}**".strip()
+        stat_line = f" – Avg: {data['average']} | 👑 Wins: {king_wins[gid].get(uid, 0)}"
+        lines.append(name_line)
+        lines.append(stat_line)
+
+    await ctx.send("\n".join(lines))
+
+
 
 @bot.command()
 async def testscore(ctx, average: int, best: int, user: discord.Member = None):
@@ -223,19 +236,6 @@ async def channel(ctx, announce_channel_id: int, score_channel_id: int):
     await ctx.send(f"✅ Channels updated:\n• Announce: <#{announce_channel_id}>\n• Score: <#{score_channel_id}>")
 
 @bot.command()
-async def wipeall(ctx):
-    if not (ctx.author.id == ctx.guild.owner_id or has_authorized_role(ctx)):
-        return await ctx.send("⛔ Only the server owner or authorized users can use this command.")
-
-    gid = ctx.guild.id
-
-    # Clear scores but leave king wins intact
-    ethno_scores[gid] = {}
-    open(get_score_file(gid), "w").close()
-
-    await ctx.send("🧹 All daily scores have been wiped for this server.")
-
-@bot.command()
 async def timeleft(ctx):
     now = datetime.now(timezone.utc)
 
@@ -271,7 +271,6 @@ async def johnny(ctx):
 **!deletescore @user** – Delete score
 **!channel <announce_id> <score_id>** – Set bot channels
 **!timeleft** – Show time left until reset and winner announcement
-**!wipeall** – Manually wipe all daily scores
 **!testreset** – Reset scores for testing and announce winner"""
     )
 
@@ -279,11 +278,10 @@ async def johnny(ctx):
 @bot.event
 async def on_message(message):
     if message.author == bot.user or not message.guild:
-        return
+        return await bot.process_commands(message)
 
     gid = message.guild.id
 
-    # Ensure data is always loaded
     if gid not in ethno_scores:
         load_scores(gid)
     if gid not in bot.guild_configs:
@@ -293,28 +291,31 @@ async def on_message(message):
     if config and message.channel.id == config.get("score_channel_id"):
         print(f"[DEBUG] Message from {message.author.display_name}:\n{message.content}\n")
 
-        # Only match the average score
-        avg_match = re.search(r"average of (\d+)", message.content, re.IGNORECASE)
+        # Normalize message: remove line breaks for better regex matching
+        content = message.content.replace("\n", " ").strip()
+
+        # Match average score from message
+        avg_match = re.search(r"average of (\d+)", content, re.IGNORECASE)
         if not avg_match:
             print("[DEBUG] No average score found.")
-            return
+            return await bot.process_commands(message)
 
         avg = int(avg_match.group(1))
 
         # 🚨 Cheat detection
         if avg == 5000:
             await message.channel.send(f"🚨 Cheater detected: **{message.author.display_name}**.")
-            return
+            return await bot.process_commands(message)
 
-        # 🔁 Prevent multiple posts per day
+        # Prevent multiple submissions
         if message.author.id in ethno_scores.get(gid, {}):
             await message.channel.send(f"⚠️ **{message.author.display_name}** already posted today.")
-            return
+            return await bot.process_commands(message)
 
-        # ✅ Save with just average (best = None or same as avg if you want to populate)
+        # ✅ Save score
         ethno_scores.setdefault(gid, {})[message.author.id] = {
             'average': avg,
-            'best': avg,  # or set to 0 or None if you'd rather not use it at all
+            'best': avg,
             'name': message.author.display_name
         }
         save_scores(gid)
