@@ -4,6 +4,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import re
 import os
 import pytz
+from pytz import utc
+from datetime import datetime, timedelta, timezone
+
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -15,8 +18,8 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 scheduler = AsyncIOScheduler()
 
 bot.guild_configs = {}  # guild_id: {announce_channel_id, score_channel_id}
-ETHNO_KING_ROLE_ID = "CHANGE_THIS"
-AUTHORIZED_ROLE_ID = "CHANGE_THIS" #
+ETHNO_KING_ROLE_ID = "XXX"
+AUTHORIZED_ROLE_ID = "XXX" #
 UNAUTHORIZED_IMAGE_URL = "https://i.imgur.com/02JdB5S.gif"
 
 ethno_scores = {}  # {guild_id: {user_id: score_data}}
@@ -80,7 +83,7 @@ def load_guild_configs():
                 }
 # --- Role/Authorization Helpers ---
 def has_authorized_role(ctx):
-    return any(role.id == AUTHORIZED_ROLE_ID for role in ctx.author.roles) or ctx.author.id == CHANGE_THIS
+    return any(role.id == AUTHORIZED_ROLE_ID for role in ctx.author.roles) or ctx.author.id == XXX
 
 async def unauthorized_response(ctx):
     await ctx.send("⛔ You are not authorized to use this command.")
@@ -124,14 +127,28 @@ def schedule_announce(gid):
 
 # --- Startup ---
 @bot.event
+@bot.event
 async def on_ready():
     load_guild_configs()
     print(f"Logged in as {bot.user}")
+
     for guild in bot.guilds:
         gid = guild.id
         load_scores(gid)
-        scheduler.add_job(schedule_announce(gid), 'cron', hour=23, minute=59, timezone=pytz.timezone("US/Central"))
-        scheduler.add_job(lambda g=gid: save_scores(g) or ethno_scores[g].clear(), 'cron', hour=0, minute=0, timezone=pytz.timezone("US/Central"))
+
+        # Announce winner at 23:55 UTC
+        scheduler.add_job(schedule_announce(gid), 'cron', hour=23, minute=55, timezone=utc)
+
+        # Reset scores and clear file at 00:00 UTC
+        scheduler.add_job(
+            lambda g=gid: (
+                save_scores(g),
+                ethno_scores[g].clear(),
+                open(get_score_file(g), "w").close()
+            ),
+            'cron', hour=0, minute=0, timezone=utc
+        )
+
     scheduler.start()
 
 # --- Commands ---
@@ -206,6 +223,44 @@ async def channel(ctx, announce_channel_id: int, score_channel_id: int):
     await ctx.send(f"✅ Channels updated:\n• Announce: <#{announce_channel_id}>\n• Score: <#{score_channel_id}>")
 
 @bot.command()
+async def wipeall(ctx):
+    if not (ctx.author.id == ctx.guild.owner_id or has_authorized_role(ctx)):
+        return await ctx.send("⛔ Only the server owner or authorized users can use this command.")
+
+    gid = ctx.guild.id
+
+    # Clear scores but leave king wins intact
+    ethno_scores[gid] = {}
+    open(get_score_file(gid), "w").close()
+
+    await ctx.send("🧹 All daily scores have been wiped for this server.")
+
+@bot.command()
+async def timeleft(ctx):
+    now = datetime.now(timezone.utc)
+
+    # Define reset and announce times in UTC
+    reset_time = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    announce_time = now.replace(hour=23, minute=55, second=0, microsecond=0)
+
+    if announce_time < now:
+        announce_time += timedelta(days=1)
+
+    time_until_announce = announce_time - now
+    time_until_reset = reset_time - now
+
+    def format_td(td):
+        total_seconds = int(td.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+    await ctx.send(
+        f"🕒 Time until winner announcement (UTC): `{format_td(time_until_announce)}`\n"
+        f"🔄 Time until score reset (UTC): `{format_td(time_until_reset)}`"
+    )
+
+@bot.command()
 async def johnny(ctx):
     await ctx.send(
         """### 📘 EthnoGuessr Bot Commands
@@ -215,6 +270,8 @@ async def johnny(ctx):
 **!addscore @user <avg> <best>** – Manually add score
 **!deletescore @user** – Delete score
 **!channel <announce_id> <score_id>** – Set bot channels
+**!timeleft** – Show time left until reset and winner announcement
+**!wipeall** – Manually wipe all daily scores
 **!testreset** – Reset scores for testing and announce winner"""
     )
 
@@ -223,30 +280,45 @@ async def johnny(ctx):
 async def on_message(message):
     if message.author == bot.user or not message.guild:
         return
+
     gid = message.guild.id
     if gid not in ethno_scores:
         load_scores(gid)
+
     config = bot.guild_configs.get(gid)
     if config and message.channel.id == config.get("score_channel_id"):
-        pattern = r"You scored an average of (\d+) over 10 rounds in today's EthnoGuessr![\s\S]*?Your best round was round \d+ with (\d+) points guessing .+!"
-        match = re.search(pattern, message.content)
+        # 🔍 Print the raw message for debugging
+        print(f"[DEBUG] Raw message:\n{message.content}\n")
+
+        # 🧠 More flexible regex
+        pattern = r"average of (\d+)[^\n]*?\n.*?best round.*?(\d+)"
+        match = re.search(pattern, message.content, re.IGNORECASE | re.DOTALL)
+
         if match:
             avg, best = int(match.group(1)), int(match.group(2))
+
             if avg == 5000:
                 await message.channel.send(f"🚨 Cheater detected: **{message.author.display_name}**.")
                 return
+
             if message.author.id in ethno_scores.get(gid, {}):
                 await message.channel.send(f"⚠️ **{message.author.display_name}** already posted today.")
                 return
+
             ethno_scores.setdefault(gid, {})[message.author.id] = {
-                'average': avg, 'best': best, 'name': message.author.display_name
+                'average': avg,
+                'best': best,
+                'name': message.author.display_name
             }
             save_scores(gid)
+
             await message.channel.send(
                 f"📊 Recorded EthnoGuessr results for **{message.author.display_name}**!\n"
                 f"• 🧮 Average Score: {avg}\n"
                 f"• 🥇 Best Round: {best}"
             )
+        else:
+            print("[DEBUG] No match found in message.")
     await bot.process_commands(message)
 
 # --- Bot Runner ---
